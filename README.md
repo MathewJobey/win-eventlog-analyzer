@@ -7,14 +7,13 @@ This utility provides a text-based UI to choose a Windows Event Log and a start/
 ---
 
 ## Features
-
+<span style="color: red; font-weight: bold;">**⚠️To read the Security log, you must run the script as Administrator!**</span>
 * Interactive selection of event log (`Application`, `Security`, `Setup`, `System`, `ForwardedEvents`).
 * Accepts `YYYY-MM-DD` or `YYYY-MM-DD HH:MM[:SS]` formats for start/end datetimes.
 * Aggregates events by normalized EventID and computes frequency, sources, levels, timestamps and descriptions.
 * Writes `log_analysis.xlsx` and backs up any existing file with a timestamp suffix.
 * **Output will be exclusively stored in your Windows user's `Downloads` folder.**
 * Applies post-processing with `openpyxl` for spreadsheet usability.
-* Graceful, informative error messages (e.g. missing dependencies, permission hints).
 
 ---
 
@@ -94,7 +93,6 @@ Wrote report to 'C:\Users\<YourUser>\Downloads\log_analysis.xlsx'.
 ## Notes & Troubleshooting
 
 * Works only on Windows.
-* <span style="color: red; font-weight: bold;">**To read the Security log, you must run the script as Administrator!**</span>
 * If you give only a date (YYYY-MM-DD) as `end`, it is treated as `23:59:59`.
 * Large logs may take time to scan.
 * If formatting fails, a plain Excel file is still written.
