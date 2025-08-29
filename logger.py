@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-logger.py
+logger.py (patched: always write output to user's Downloads)
 
 Terminal UI to select Windows Event Log and a start/end datetime range,
 read events from that log (legacy win32evtlog API), report counts, then
-aggregate by normalized EventID and write an Excel report named log_analysis.xlsx.
+aggregate by normalized EventID and write an Excel report named log_analysis.xlsx
+into the current user's Downloads folder.
 
 Compatible with Python 3.7+.
 """
@@ -19,12 +20,15 @@ import os
 import shutil
 from typing import Tuple, List, Dict, Any, Optional
 
-# third-party will be imported lazily with helpful errors
 # ---------------------------
 # Config
 # ---------------------------
 OUTPUT_FILENAME = "log_analysis.xlsx"
 BACKUP_TS_FMT = "%Y%m%d_%H%M%S"
+
+# Ensure Downloads target
+DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+DEFAULT_OUTPUT_PATH = os.path.join(DOWNLOADS_DIR, OUTPUT_FILENAME)
 
 # Allowed log names mapping: user can enter number or name (case-insensitive)
 LOG_CHOICES = [
@@ -34,7 +38,6 @@ LOG_CHOICES = [
     ("System", "System"),
     ("ForwardedEvents", "Forwarded Events"),
 ]
-
 
 # ---------------------------
 # Input parsing / prompts
@@ -167,19 +170,6 @@ def _event_time_to_datetime(ev_time) -> datetime.datetime:
 
 # basic map for event types -> human string (values fetched from win32evtlog when available)
 def _event_type_to_label(event_type, win32evtlog_module=None) -> str:
-    """
-    Map numeric level values to the requested strings:
-      1 -> CRITICAL
-      2 -> ERROR
-      3 -> WARNING
-      4 -> INFORMATIONAL
-      5 -> VERBOSE
-
-    If an unknown numeric value is seen, fall back to attempting to use
-    win32evtlog constants (if win32evtlog_module provided) or return the value
-    as string.
-    """
-    # Prefer the explicit mapping the user asked for
     explicit_map = {
         1: "CRITICAL",
         2: "ERROR",
@@ -188,14 +178,10 @@ def _event_type_to_label(event_type, win32evtlog_module=None) -> str:
         5: "VERBOSE",
     }
     try:
-        # if event_type is e.g. a win32 constant integer, map it directly
         if isinstance(event_type, int):
             if event_type in explicit_map:
                 return explicit_map[event_type]
-            # if module provided, try mapping common win32evtlog constants to their numeric values
             if win32evtlog_module:
-                # attempt to detect common event type constants and map them
-                # (this preserves behavior for other numeric codes)
                 module_map = {
                     getattr(win32evtlog_module, "EVENTLOG_ERROR_TYPE", None): explicit_map.get(2, "ERROR"),
                     getattr(win32evtlog_module, "EVENTLOG_WARNING_TYPE", None): explicit_map.get(3, "WARNING"),
@@ -203,16 +189,13 @@ def _event_type_to_label(event_type, win32evtlog_module=None) -> str:
                     getattr(win32evtlog_module, "EVENTLOG_AUDIT_SUCCESS", None): "AUDIT_SUCCESS",
                     getattr(win32evtlog_module, "EVENTLOG_AUDIT_FAILURE", None): "AUDIT_FAILURE",
                 }
-                # module_map keys may include None; handle robustly
                 label = module_map.get(event_type)
                 if label:
                     return label
-            # fallback to string of the numeric value (or unknown)
             return str(event_type)
     except Exception:
         pass
 
-    # If event_type is not int (could be string/other), fall back to previous heuristic
     if win32evtlog_module:
         fallback = {
             getattr(win32evtlog_module, "EVENTLOG_ERROR_TYPE", 1): "ERROR",
@@ -223,7 +206,6 @@ def _event_type_to_label(event_type, win32evtlog_module=None) -> str:
         }
         return fallback.get(event_type, str(event_type))
 
-    # final fallback
     fallback_simple = {
         1: "ERROR",
         2: "WARNING",
@@ -235,20 +217,10 @@ def _event_type_to_label(event_type, win32evtlog_module=None) -> str:
 
 
 def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime, end_dt: datetime.datetime,
-                                     out_filename: str = OUTPUT_FILENAME) -> None:
+                                     out_filename: str = DEFAULT_OUTPUT_PATH) -> None:
     """
     Read the event log, aggregate by normalized EventID (EventID & 0xFFFF), and
     write an Excel report. Existing file is backed up first.
-
-    After writing via pandas, load with openpyxl and apply UI-friendly formatting:
-      - Freeze top header row
-      - Bold header, light fill
-      - Auto-filter enabled
-      - Wrap text for Description column
-      - Compute column widths from content (with sensible min/max limits)
-      - Set header row height and default row height
-      - Set zoomScale to help fit the table on one screen
-      - Page setup: fit to 1 page width for printing
     """
     try:
         import win32evtlog
@@ -258,7 +230,6 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
         print("Install with: pip install pywin32")
         raise
 
-    # pandas/openpyxl for writing Excel
     try:
         import pandas as pd
     except Exception:
@@ -273,6 +244,18 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
     except Exception:
         print("ERROR: openpyxl is required for Excel formatting. Install with: pip install openpyxl")
         raise
+
+    # Ensure we have an absolute path and that Downloads exists
+    if not out_filename:
+        out_filename = DEFAULT_OUTPUT_PATH
+    out_filename = os.path.abspath(out_filename)
+    downloads_dir = os.path.dirname(out_filename)
+    try:
+        os.makedirs(downloads_dir, exist_ok=True)
+    except Exception as e:
+        print(f"Warning: failed to create Downloads directory {downloads_dir!r}: {e}")
+
+    print(f"[INFO] Writing report to: {out_filename!r}")
 
     flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
     server = None
@@ -306,6 +289,7 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
                     else:
                         continue
                 except Exception:
+                    # keep previous behavior but consider enabling debug logging if needed
                     continue
 
                 if not (start_dt <= evt_time <= end_dt):
@@ -396,20 +380,22 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
 
     df = pd.DataFrame(rows, columns=["SI no", "EventID", "Source", "Level", "Task Category", "Timestamp (logged)", "Description", "Frequency"])
 
-    # Backup existing Excel if present
+    # Backup existing Excel if present (use absolute backup path)
     if os.path.exists(out_filename):
         ts = datetime.datetime.now().strftime(BACKUP_TS_FMT)
-        backup_name = f"{os.path.splitext(out_filename)[0]}_{ts}{os.path.splitext(out_filename)[1]}"
+        base, ext = os.path.splitext(out_filename)
+        backup_name = f"{base}_{ts}{ext}"
         try:
             shutil.move(out_filename, backup_name)
             print(f"Backed up existing '{out_filename}' -> '{backup_name}'")
         except Exception as e:
             print(f"Warning: failed to back up existing '{out_filename}': {e}")
 
-    # Write Excel using pandas (openpyxl engine)
+    # Write Excel using pandas (openpyxl engine) to absolute path
     try:
-        df.to_excel(out_filename, index=False)
-        print(f"Wrote report to '{out_filename}' ({len(df)} unique EventIDs).")
+        abs_out = os.path.abspath(out_filename)
+        df.to_excel(abs_out, index=False)
+        print(f"Wrote report to '{abs_out}' ({len(df)} unique EventIDs).")
     except Exception as e:
         print(f"ERROR: failed to write Excel file '{out_filename}': {e}")
         raise
@@ -418,7 +404,7 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
     # Post-process workbook with openpyxl formatting
     # ============================================
     try:
-        wb = openpyxl.load_workbook(out_filename)
+        wb = openpyxl.load_workbook(abs_out)
         ws = wb.active  # first sheet
 
         # Header styling
@@ -446,27 +432,21 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
             ws.row_dimensions[i].height = default_row_height
 
         # Compute column widths based on max length of content (with limits)
-        # We'll treat Description and Timestamp specially
-        max_col_width = 80  # upper cap (reasonable for most screens)
+        max_col_width = 80
         min_col_width = 8
 
         for idx, col in enumerate(df.columns, start=1):
             col_letter = get_column_letter(idx)
-            # Gather max length of column header and cell contents
             max_len = len(str(col))
             for cell in ws[col_letter]:
                 if cell.value is None:
                     continue
-                # For multi-line cells, consider the longest line
                 s = str(cell.value)
-                # replace newlines to estimate width of the longest line
                 longest_line = max((len(line) for line in s.splitlines()), default=len(s))
                 if longest_line > max_len:
                     max_len = longest_line
-            # Special adjustments
             if col == "Description":
-                width = min(max(max_len + 4, 30), max_col_width)  # Description should be wide but capped
-                # Wrap text for description column
+                width = min(max(max_len + 4, 30), max_col_width)
                 for cell in ws[col_letter]:
                     cell.alignment = Alignment(wrap_text=True, vertical="top")
             elif col == "Timestamp (logged)":
@@ -479,23 +459,19 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
                     cell.alignment = Alignment(wrap_text=False, vertical="center")
             ws.column_dimensions[col_letter].width = width
 
-        # Set sheet view zoom to fit more columns on a single screen (user can still change in Excel)
         try:
-            ws.sheet_view.zoomScale = 80  # percent
+            ws.sheet_view.zoomScale = 80
         except Exception:
-            # some openpyxl versions differ; ignore if fails
             pass
 
-        # Page setup: fit to 1 page wide (useful when printing)
         try:
             ws.page_setup.fitToWidth = 1
             ws.page_setup.fitToHeight = 0
         except Exception:
             pass
 
-        # Save workbook
-        wb.save(out_filename)
-        print(f"Applied formatting to '{out_filename}' (freeze header, filters, column widths, wrap description).")
+        wb.save(abs_out)
+        print(f"Applied formatting to '{abs_out}' (freeze header, filters, column widths, wrap description).")
     except Exception as e:
         print(f"Warning: failed to apply Excel formatting: {e}")
         # do not raise — the raw file is still present
@@ -506,6 +482,7 @@ def aggregate_events_and_write_excel(log_name: str, start_dt: datetime.datetime,
     print(f"Events matched in window               : {matched}")
     print(f"Unique EventIDs found                  : {len(df)}")
     print("-----------------------------\n")
+
 
 # ---------------------------
 # Main flow
@@ -527,16 +504,15 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
-    # First quick read to count scans and matches (keeps small memory) -- reuse earlier logic
     try:
-        # We'll reuse the read loop but not keep heavy data; use aggregate function directly because it reads and aggregates in one pass.
         print("\nProceed to aggregate and write Excel report now? (y/n)")
         ans = input("> ").strip().lower()
         if ans not in ("y", "yes"):
             print("Skipping aggregation. Exiting after input step.")
             sys.exit(0)
 
-        aggregate_events_and_write_excel(selected_log, start_dt, end_dt, out_filename=OUTPUT_FILENAME)
+        # Always write into Downloads by default
+        aggregate_events_and_write_excel(selected_log, start_dt, end_dt, out_filename=DEFAULT_OUTPUT_PATH)
     except RuntimeError as re:
         print("\nRuntime error while attempting to access event logs:")
         print(re)
