@@ -12,6 +12,7 @@ This utility provides a text-based UI to choose a Windows Event Log and a start/
 * Accepts `YYYY-MM-DD` or `YYYY-MM-DD HH:MM[:SS]` formats for start/end datetimes.
 * Aggregates events by normalized EventID and computes frequency, sources, levels, timestamps and descriptions.
 * Writes `log_analysis.xlsx` and backs up any existing file with a timestamp suffix.
+* **Output will be exclusively stored in your Windows user's `Downloads` folder.**
 * Applies post-processing with `openpyxl` for spreadsheet usability.
 * Graceful, informative error messages (e.g. missing dependencies, permission hints).
 
@@ -33,7 +34,7 @@ Install requirements with:
 pip install pywin32 pandas openpyxl
 ```
 
-> If you plan to run the script against the **Security** log, run it from an elevated/admin prompt.
+> <span style="color: red; font-weight: bold;">**IMPORTANT:** If you want to access the <u>Security</u> log, you must run this script as Administrator (elevated prompt)!</span>
 
 ---
 
@@ -41,6 +42,7 @@ pip install pywin32 pandas openpyxl
 
 * `logger.py` — main script (interactive).
 * Output: `log_analysis.xlsx` — generated Excel report. If a file exists, it will be backed up with a timestamp appended.
+* **The Excel report will always be saved in your Windows user's `Downloads` folder.**
 
 ---
 
@@ -57,7 +59,7 @@ Typical flow:
 1. Choose Event Log to read.
 2. Enter `Start datetime` and `End datetime`.
 3. Confirm to proceed with aggregation.
-4. Result: `log_analysis.xlsx` will be created.
+4. Result: `log_analysis.xlsx` will be created in your `Downloads` folder.
 
 Example:
 
@@ -71,7 +73,7 @@ End datetime: 2024-09-30
 Accepted range: 2024-09-01 00:00:00 -> 2024-09-30 23:59:59
 
 Proceed? (y/n): y
-Wrote report to 'log_analysis.xlsx'.
+Wrote report to 'C:\Users\<YourUser>\Downloads\log_analysis.xlsx'.
 ```
 
 ---
@@ -92,10 +94,11 @@ Wrote report to 'log_analysis.xlsx'.
 ## Notes & Troubleshooting
 
 * Works only on Windows.
-* Reading `Security` log requires Administrator rights.
+* <span style="color: red; font-weight: bold;">**To read the Security log, you must run the script as Administrator!**</span>
 * If you give only a date (YYYY-MM-DD) as `end`, it is treated as `23:59:59`.
 * Large logs may take time to scan.
 * If formatting fails, a plain Excel file is still written.
+* **All output Excel files are saved in your `Downloads` folder.**
 
 ---
 
